@@ -1,0 +1,10 @@
+Header header
+string child_frame_id
+float64 p_gain
+float64 i_gain
+float64 d_gain
+float64 i_clamp_max
+float64 i_clamp_min
+float64 pid_multiplier
+float64 velocity_max
+float64 velocity_damping
