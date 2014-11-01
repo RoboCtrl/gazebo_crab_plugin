@@ -51,7 +51,7 @@ namespace gazebo {
 				ready_(false), joint_(&joint), desired_value_(0), save_to_file_(false),
 				past_index_(0), joint_velocity_(0), joint_max_force_(5.0), joint_max_velocity_(2*M_PI),
 				joint_desired_velocity_(0), joint_delta_force_(0), joint_angle_(0), joint_force_(0),
-				update_type_(1), reset_(false) {
+				update_type_(1), input_type_(0), reset_(false) {
 				
 				parent_ = parent;
 				nh_ = parent_->getNH();
@@ -120,6 +120,9 @@ namespace gazebo {
 				desired_value_ = data;
 			};
 			
+			/** @brief this function takes a serialized (human-readable string) message and sets the parameters. the parameters
+			 *         are expected in a fixed order and are seperated by a single space. the number of parameters is optional.
+			 */
 			void subParamStrCallback( const std_msgs::String::ConstPtr &msg ) {
 				
 				std::cout << "setting joint '" << joint_->GetName() << "' params via topic ["
@@ -137,6 +140,8 @@ namespace gazebo {
 					float64 velocity_max
 					float64 velocity_damping
 					integer reset (0=no reset, 1=reset joint)
+					int32   input_type (0=position, 1=velocity)
+					int32   update_type (0=force, 1=delta-force)
 				*/
 				
 				pid_.reset();
@@ -184,6 +189,12 @@ namespace gazebo {
 								joint_->Reset();
 							}
 							*/
+							break;
+						case 9:
+							input_type_ = atoi( element.c_str() );
+							break;
+						case 10:
+							update_type_ = atoi( element.c_str() );
 							break;
 						default:
 							// error
@@ -239,7 +250,42 @@ namespace gazebo {
 				velocity_damping_ = msg->velocity_damping;
 				pid_multiplier_ = msg->pid_multiplier;
 				pid_.setGains( msg->p_gain, msg->i_gain, msg->d_gain, msg->i_clamp_max, msg->i_clamp_min );
+				reset_ = msg->reset;
+				input_type_ = msg->input_type;
+				update_type_ = msg->update_type;
 			};
+			
+			double update_input_pos() {
+				double current_angle = joint_->GetAngle( 0 ).Radian();
+				double d_angle = desired_value_ - current_angle;
+				return d_angle;
+			}
+			
+			double update_input_vel() {
+				double current_angle = joint_->GetAngle( 0 ).Radian();
+				double d_angle = desired_value_ - current_angle;
+				ros::Time now = ros::Time::now();					// current time
+				ros::Duration dt = now - time_last_update_;			// delta time (now - last update)
+				
+				int last_index = past_index_;
+				past_index_ = (past_index_ + 1) % past_values_.size();
+				past_values_[past_index_] = current_angle;
+				joint_velocity_ = past_values_[past_index_] - past_values_[last_index];
+				
+				// compute our desired velocity
+				//   velocity to reach the target angle with the next tick: d_angle / dt
+				//   we additionally apply a damping factor, so that we would reach the desired angle in dt/damping_factor seconds (instead of dt seconds)
+				double desired_velocity = velocity_damping_ * d_angle / dt.toSec();
+				if( desired_velocity > joint_max_velocity_ ) {
+					desired_velocity = joint_max_velocity_;
+				} else if( desired_velocity < -joint_max_velocity_ ) {
+					desired_velocity = -joint_max_velocity_;
+				}
+				
+				double d_vel = desired_velocity - joint_velocity_;			// by what value we want to change the current joint velocity
+				
+				return d_vel;
+			}
 			
 			/// @brief called to update the joint state according to the PID controller and the desired state
 			void update_directForce() {
@@ -267,6 +313,12 @@ namespace gazebo {
 				
 				// apply force to joint
 				joint_->SetForce( 0, new_force );
+				
+				// save some values that we might publish
+				joint_angle_ = current_angle;
+				joint_desired_velocity_ = 0.0;
+				joint_delta_force_ = new_force - joint_force_;
+				joint_force_ = new_force;
 				
 				// we only publish when we have at least one subscriber to our topic
 				if( pub_.getNumSubscribers() > 0 ) {
@@ -437,18 +489,100 @@ namespace gazebo {
 				if( !ready_ )
 					return;
 				
-				switch( update_type_ ) {
+				if( reset_ ) {
+					parent_->resetModel();
+					joint_->Reset();
+					joint_->SetVelocity( 0, 0.0 );
+					joint_->SetAngle( 0, 0.0 );
+					reset_ = false;
+					// todo: reset past_values_ too
+				}
+				
+				ros::Time now = ros::Time::now();					// current time
+				ros::Duration dt = now - time_last_update_;			// delta time (now - last update)
+				math::Angle joint_angle = joint_->GetAngle( 0 );	// assuming a rotary joint with a single axis/angle
+				double current_angle = joint_angle.Radian();		// actual angle
+				
+				int last_index = past_index_;
+				past_index_ = (past_index_ + 1) % past_values_.size();
+				past_values_[past_index_] = current_angle;
+				joint_velocity_ = past_values_[past_index_] - past_values_[last_index];
+				
+				double d_angle = desired_value_ - current_angle;
+				
+				// compute the pid output
+				double pid_out;
+				switch( input_type_ ) {
 					default: // fall through
 					case 0:
-						update_directForce();
+						pid_out = pid_multiplier_*pid_.computeCommand( update_input_pos(), dt );
 						break;
 					case 1:
-						update_velForce();
+						pid_out = pid_multiplier_*pid_.computeCommand( update_input_vel(), dt );
 						break;
 				}
 				
+				// compute the new force for the joint
+				double new_force;
+				switch( update_type_ ) {
+					default:
+					case 0:
+						new_force = pid_out;
+						// cap the applied joint force, if it is too large or too small
+						if( new_force > joint_max_force_ ) {
+							new_force = joint_max_force_;
+						} else if( new_force < -joint_max_force_ ) {
+							new_force = -joint_max_force_;
+						}
+						break;
+				
+					case 1:
+						new_force = joint_force_ + pid_out;
+						if( new_force > joint_max_force_ ) {
+							new_force = joint_max_force_;
+						} else if( new_force < -joint_max_force_ ) {
+							new_force = -joint_max_force_;
+						}
+						break;
+				}
+				
+				// apply the new force
+				joint_->SetForce( 0, new_force );
+				
+				// save some values that we might publish
+				joint_angle_ = current_angle;
+				joint_desired_velocity_ = 0.0;
+				joint_delta_force_ = new_force - joint_force_;
+				joint_force_ = new_force;
+				
 				time_last_update_ = ros::Time::now();
 				
+				// we only publish when we have at least one subscriber to our topic
+				if( pub_.getNumSubscribers() > 0 ) {
+					gazebo_crab_plugin::pid_joint_state msg;
+					double p, i, d, i_max, i_min;
+					msg.desired = desired_value_;
+					msg.value = joint_->GetAngle( 0 ).Radian();
+					msg.force = new_force;
+					msg.d_force = new_force - joint_force_;
+					pid_.getGains( msg.pid_p, msg.pid_i, msg.pid_d, i_min, i_max );
+					pid_.getCurrentPIDErrors( &msg.pid_pe, &msg.pid_ie, &msg.pid_de );
+					pub_.publish( msg );
+				}
+				
+				// write to joint log file
+				if( log_file_.is_open() ) {
+					// log fields: time, target_angle, current_angle, velocity, error
+					log_file_ << ros::Time::now()
+						<< " " << desired_value_		// target angle
+						<< " " << current_angle			// actuall angle
+						<< " " << joint_velocity_		// current velocity
+						<< " " << (desired_value_ - current_angle)				// position error
+						<< " " << (joint_velocity_ - joint_desired_velocity_)	// velocity error
+						<< std::endl;
+				}
+				
+				// we only publish when we have at least one subscriber to our topic
 				if( pub_err_.getNumSubscribers() > 0 ) {
 					gazebo_crab_plugin::pid_joint_error err_msg;
 					err_msg.angle = joint_angle_;
@@ -528,8 +662,11 @@ namespace gazebo {
 			/// @brief damping factor when computing the desired joint velocity
 			double velocity_damping_;
 			
-			/// @brief update type: 0=directForce, 1=velForce
+			/// @brief update type: 0=directForce, 1=deltaForce
 			int update_type_;
+			
+			/// @brief controller input: 0=position, 1=velocity
+			int input_type_;
 			
 			/// @brief if true we are resetting the joint state (angle & velocity) at the next update
 			bool reset_;

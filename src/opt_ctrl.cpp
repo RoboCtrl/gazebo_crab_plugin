@@ -63,7 +63,7 @@ bool vec_p_sort_fun( std::vector< j_param_t > left, std::vector< j_param_t > rig
 
 
 
-/// @brief copies the current time in a himan readable format into the provided string. time format: YYYY-MM-DD_hh:mm:ss
+/// @brief copies the current time in a human readable format into the provided string. time format: YYYY-MM-DD_hh:mm:ss
 void nice_time_string( std::string &result ) {
 	time_t rawtime;
 	struct tm * timeinfo;
@@ -162,9 +162,9 @@ class OptCtrl {
 							boost::bind( &OptCtrl::subErrCallback, this, _1, bot_nr, leg_nr, joint_nr )
 						);
 						
-						// advertise joint param publisher
+						// advertise joint param publisher (topic is latched)
 						snprintf( path, sizeof(path), "/test_%02i/leg_%i_joint_%i_str_param", bot_nr, leg_nr, joint_nr );
-						vec_pub_params_[bot_nr-1][leg_nr-1][joint_nr] = nh_.advertise< std_msgs::String >( path, 2 );
+						vec_pub_params_[bot_nr-1][leg_nr-1][joint_nr] = nh_.advertise< std_msgs::String >( path, 1, true );
 						
 						// no need to initialize the ros::Time object. we will do so on the first callback call
 						vec_time_[bot_nr-1][leg_nr-1][joint_nr] = ros::Time(0,0);
@@ -514,8 +514,11 @@ class OptCtrl {
 				*/
 				sum = 0.0;
 				for( int i=0; i<length; i++ ) {
-					if( vec_pos_err_[bot_nr-1][leg_nr-1][joint_nr][i] <= 0.0 )
-						std::cout << "invalid entry: " << vec_pos_err_[bot_nr-1][leg_nr-1][joint_nr][i] << std::endl;
+					if( vec_pos_err_[bot_nr-1][leg_nr-1][joint_nr][i] <= 0.0 ) {
+						std::cout << "invalid entry: " << vec_pos_err_[bot_nr-1][leg_nr-1][joint_nr][i]
+							<< "joint=" << bot_nr << "." << leg_nr << "." << joint_nr
+							<< std::endl;
+					}
 					sum += vec_pos_err_[bot_nr-1][leg_nr-1][joint_nr][i];
 				}
 				pos_error = sum / length;
@@ -568,7 +571,21 @@ class OptCtrl {
 		};
 		
 		
-		/// @brief chooses the parameters randomly from pre-set intervals. does not take any particles into account
+		/** @brief chooses the parameters randomly from pre-set intervals. does not take any particles into account
+		 * 
+		 * @note parameter intervals:
+		 * 		p [0.1, inf)				normal dist. (5, 2)
+		 * 		i [0, inf)					0.001 * normal dist. (5, 2)
+		 * 		d [0, inf)					0.001 * normal dist. (5, 2)
+		 * 		i_clamp [0, inf)			0.01 * normal dist. (5, 2)
+		 * 		max_vel [0.5, inf)			normal dist. (5, 2), unit: [radians/s]
+		 * 		damping [0.0001, 0.1]		uniform sampled
+		 * 
+		 * 		normal dist (a,b) means: a=mean value, b=sigma.
+		 * 		
+		 * 		most values are clamped at a minimum value to ensure valid values.
+		 * 
+		 */
 		void generateParamsBlind( std::vector<j_param_t> &params ) {
 			//std::default_random_engine generator;
 			std::normal_distribution<double> norm_dist(5.0,2.0);
@@ -593,7 +610,7 @@ class OptCtrl {
 				params[joint_nr].i_clamp = params[joint_nr].i_clamp > 0.0 ? params[joint_nr].i_clamp : 0.0;
 				params[joint_nr].max_vel = params[joint_nr].max_vel > 0.5 ? params[joint_nr].max_vel : 0.5;
 				
-				std::cout << "BLIND <" << joint_nr << "> " << params[joint_nr] << std::endl;
+				//std::cout << "BLIND <" << joint_nr << "> " << params[joint_nr] << std::endl;
 			}
 		};
 		
@@ -714,6 +731,12 @@ class OptCtrl {
 			}
 		}
 		
+		
+		/// @brief *not implemented yet* prints information about the internal parameters. used for log file headers
+		void printSelfParams( std::ofstream &out ) {
+			// todo: add more information
+			out << "# " << std::endl;
+		}
 		
 	private:
         ros::NodeHandle nh_;
