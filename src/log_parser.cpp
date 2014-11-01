@@ -29,7 +29,7 @@ class GenInfo {
 	public:
 		GenInfo() : gen_nr_(-1), pop_size_(0) {};
 		
-		/// @brief computes the errors (mean/min/max)
+		/// @brief computes the errors (mean/min/max) over all particles in this generation
 		bool computeErrors() {
 			int length = params_.size();
 			double sum=0, mean=0, min=0, max=0;
@@ -223,13 +223,25 @@ class LogParser {
 			if( out.is_open() ) {
 				writeMMM( out );
 				out.close();
+			} else {
+				std::cout << "failed to open output file" << std::endl;
 			}
 			
 			//std::ofstream out;
-			out.open( "/opt/shared/developer/logs/arm_test/opt_parser.particles.log" );	// mmm = mean,min,max
+			out.open( "/opt/shared/developer/logs/arm_test/opt_parser.particles.log" );
 			if( out.is_open() ) {
 				writeParticles( out );
 				out.close();
+			} else {
+				std::cout << "failed to open output file" << std::endl;
+			}
+			
+			out.open( "/opt/shared/developer/logs/arm_test/opt_parser.params.log" );
+			if( out.is_open() ) {
+				writeParams( out );
+				out.close();
+			} else {
+				std::cout << "failed to open output file" << std::endl;
 			}
 			
 		}
@@ -254,12 +266,10 @@ class LogParser {
 				line_count++;
 				
 				// debug message (info about the current line)
-				//if( verbose_)
+				//if( verbose_) {
 				//	std::cout << "reading line #" << line_count << " (length=" << line.size() << ")" << std::endl;
-				
-				// debug message (the current line)
-				//if( verbose_)
 				//	std::cout << "  >" << line << std::endl;
+				//}
 				
 				// trim whitespaces from both sides. note: removes any '\r' that might be present at the end of the line, too.
 				boost::algorithm::trim( line );
@@ -358,17 +368,52 @@ class LogParser {
 			}
 		}
 		
-		/** @brief writes generation # and particle error to the log file
+		/** @brief writes generation # and particle errors (joint 1, joint 2, joint 1+2) to the log file
 		 */
 		void writeParticles( std::ofstream &file ) {
 			for( int g=0; g<vec_gen_info_.size(); g++ ) {
 				for( int p=0; p<vec_gen_info_[g].params_.size(); p++ ) {
-					file << g
-						<< " " << vec_gen_info_[g].params_[p].error() << std::endl;
+					double error;
+					double e = vec_gen_info_[g].params_[p].error();
+					// each particle handles two joints, hence the modulo 2
+					if( p%2 == 0 ) {
+						file << g << " " << e;	// generation number and error of the first joint
+						error = e;
+					} else {
+						error += e;
+						file << " " << e << " " << error << std::endl;	// error of the second joint, combined error and end of line
+					}
 				}
 			}
 		}
-	
+		
+		/** @brief writes generation number and all params to the log file. each line
+		 *         starts with the generation number and the parameters of all joints of the particle.
+		 */
+		void writeParams( std::ofstream &file ) {
+			for( int g=0; g<vec_gen_info_.size(); g++ ) {
+				for( int p=0; p<vec_gen_info_[g].params_.size(); p++ ) {
+					if( p%2 == 0 )
+						file << g;
+					
+					file
+						<< " " << vec_gen_info_[g].params_[p].p
+						<< " " << vec_gen_info_[g].params_[p].i
+						<< " " << vec_gen_info_[g].params_[p].d
+						<< " " << vec_gen_info_[g].params_[p].i_clamp
+						<< " " << vec_gen_info_[g].params_[p].multiplier
+						<< " " << vec_gen_info_[g].params_[p].max_vel
+						<< " " << vec_gen_info_[g].params_[p].damping;
+					
+					if( p%2 == 0 ) {
+					} else {
+						file << std::endl;
+					}
+				}
+				file << std::endl;
+			}
+		}
+		
 	private:
 		
 		std::vector< GenInfo > vec_gen_info_;
