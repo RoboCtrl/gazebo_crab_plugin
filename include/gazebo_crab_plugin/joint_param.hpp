@@ -19,6 +19,8 @@ typedef struct {
 	double damping;				// velocity damping
 	double vel_sq_mean_error;	// mean square error of the joint velocity
 	double pos_sq_mean_error;	// mean square error of the joint position
+	int input_type;				// 0=position, 1=velocity
+	int update_type;			// 0=force, 1=delta-force
 	
 	/// @brief sets the values of the structure based on the values defined in the input string 'str'. the input format is the same as used for the log files (name=value strings, separated by spaces).
 	void apply( const std::string &str ) {

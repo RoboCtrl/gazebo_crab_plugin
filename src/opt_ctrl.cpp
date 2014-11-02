@@ -321,14 +321,17 @@ class OptCtrl {
 			for( int j=2; j<=3; j++ ) {
 				vec_params_[bot_nr-1][leg_nr-1][j] = vec_new_params[j];
 				char str_params[256];
-				snprintf( str_params, sizeof(str_params), "%f %f %f %f %f 1.0 %f %f",
+				snprintf( str_params, sizeof(str_params), "%f %f %f %f %f 1.0 %f %f %u %u %u",
 					vec_new_params[j].p,
 					vec_new_params[j].i,
 					vec_new_params[j].d,
 					vec_new_params[j].i_clamp,
 					-vec_new_params[j].i_clamp,
 					vec_new_params[j].max_vel,
-					vec_new_params[j].damping
+					vec_new_params[j].damping,
+					1,		// reset: 1=true
+					( reset_count_ % 4 ) / 2,		// input type: 0,0,1,1,0,0,1,1, ...
+					reset_count_ % 2				// update_type: 0,1,0,1,0,1, ...
 				);
 				std_msgs::String msg_param;
 				msg_param.data = str_params;
@@ -380,19 +383,27 @@ class OptCtrl {
 				}
 			}
 			
-			// if our population pool is not full yet, we simply add the particle to the pool
-			if( pop_size < max_population_ ) {
-				vec_pop_params_.push_back( params );
-				printVecPopulation();
-				return;
-			}
+			do {
+				
+				// if our population pool is not full yet, we simply add the particle to the pool
+				if( pop_size < max_population_ ) {
+					vec_pop_params_.push_back( params );
+					//printVecPopulation();
+					break;
+				}
+				
+				// sort by error (smalles (combined) error has the smalles index)
+				std::sort( vec_pop_params_.begin(), vec_pop_params_.end(), vec_p_sort_fun );
+				
+				// check if out current error is smaller than the maximum error in the population
+				if( vec_p_sort_fun(params, vec_pop_params_[pop_size-1]) ) {
+					vec_pop_params_[pop_size-1] = params;
+					//printVecPopulation();
+				}
+			} while( 0 );
 			
-			// sort by error (smalles (combined) error has the smalles index)
-			std::sort( vec_pop_params_.begin(), vec_pop_params_.end(), vec_p_sort_fun );
-			
-			// check if out current error is smaller than the maximum error in the population
-			if( vec_p_sort_fun(params, vec_pop_params_[pop_size-1]) ) {
-				vec_pop_params_[pop_size-1] = params;
+			// print the gene pool for this generation
+			if( generation_ % 30 == 0 ) {
 				printVecPopulation();
 			}
 		};
@@ -491,7 +502,9 @@ class OptCtrl {
 				sum = 0.0;
 				for( int i=0; i<length; i++ ) {
 					if( vec_vel_err_[bot_nr-1][leg_nr-1][joint_nr][i] <= 0.0 )
-						std::cout << "invalid entry: " << vec_vel_err_[bot_nr-1][leg_nr-1][joint_nr][i] << std::endl;
+						std::cout << "invalid vel-error entry: " << vec_vel_err_[bot_nr-1][leg_nr-1][joint_nr][i]
+							<< ", joint=" << bot_nr << "." << leg_nr << "." << joint_nr
+							<< std::endl;
 					sum += vec_vel_err_[bot_nr-1][leg_nr-1][joint_nr][i];
 				}
 				vel_error = sum / length;
@@ -515,8 +528,8 @@ class OptCtrl {
 				sum = 0.0;
 				for( int i=0; i<length; i++ ) {
 					if( vec_pos_err_[bot_nr-1][leg_nr-1][joint_nr][i] <= 0.0 ) {
-						std::cout << "invalid entry: " << vec_pos_err_[bot_nr-1][leg_nr-1][joint_nr][i]
-							<< "joint=" << bot_nr << "." << leg_nr << "." << joint_nr
+						std::cout << "invalid pos-error entry: " << vec_pos_err_[bot_nr-1][leg_nr-1][joint_nr][i]
+							<< ", joint=" << bot_nr << "." << leg_nr << "." << joint_nr
 							<< std::endl;
 					}
 					sum += vec_pos_err_[bot_nr-1][leg_nr-1][joint_nr][i];
@@ -699,8 +712,8 @@ class OptCtrl {
 			int pop_size = vec_pop_params_.size();
 			
 			std::cout << "gen " << generation_
-				<< " (" << (generation_/30+1) << ")"
-				<< ", population (size=" << pop_size << ") top 10:"
+				<< " (" << (generation_/30) << ")"
+				<< ", population (size=" << pop_size << ")"
 				<< std::endl;
 			/*
 			for( int i=0; i<pop_size && i<10; i++ ) {
@@ -719,6 +732,7 @@ class OptCtrl {
 							std::cout << "failed to open log file '" << pop_log_filename_ << "'" << std::endl;
 							break;
 						}
+						printSelfParams( pop_log_file_ );
 					}
 					
 					for( int i=0; i<pop_size; i++ ) {
@@ -735,7 +749,11 @@ class OptCtrl {
 		/// @brief *not implemented yet* prints information about the internal parameters. used for log file headers
 		void printSelfParams( std::ofstream &out ) {
 			// todo: add more information
-			out << "# " << std::endl;
+			out << "# "
+				<< "reset_count=" << reset_count_
+				<< "input_type=" << (( reset_count_ % 4 ) / 2)
+				<< "update_type=" << (reset_count_ % 2)
+				<< std::endl;
 		}
 		
 	private:

@@ -8,5 +8,6 @@ float64 i_clamp_min
 float64 pid_multiplier
 float64 velocity_max
 float64 velocity_damping
+uint32 reset
 uint32 input_type
 uint32 update_type
