@@ -137,6 +137,9 @@ add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}_gencfg)
 add_executable(opt_ctrl src/opt_ctrl.cpp)
 
 
+add_executable(opt_ctrl2 src/node.cpp src/opt_ctrl2.cpp)
+
+
 add_executable(log_parser src/log_parser.cpp)
 
 
@@ -152,6 +155,10 @@ target_link_libraries(${PROJECT_NAME}
 target_link_libraries(opt_ctrl
   ${catkin_LIBRARIES}
   ${GAZEBO_LIBRARIES}
+)
+
+target_link_libraries(opt_ctrl2
+  ${catkin_LIBRARIES}
 )
 
 target_link_libraries(log_parser

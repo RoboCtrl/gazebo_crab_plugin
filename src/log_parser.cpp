@@ -99,7 +99,7 @@ class LogParser {
 	
 	
 	public:
-		LogParser() : verbose_(true), max_generation_(100) {
+		LogParser() : verbose_(true), max_generation_(1000) {
 			
 			askInFilename();
 			/*
@@ -275,8 +275,10 @@ class LogParser {
 				boost::algorithm::trim( line );
 				
 				// lines that start with a '#' are comments. we ignore these
-				if( line[0] == '#' )
+				if( line[0] == '#' ) {
+					readComment( line );
 					continue;
+				}
 				
 				// split the strings, so that each substring contains the parameters for a single joint. strings start with 'generation='.
 				size_t start = 0;
@@ -324,7 +326,7 @@ class LogParser {
 						
 						if( vec_nv[0] == "generation" ) {
 							//generation = atoi(vec_nv[1].c_str() );
-							generation = (std::stoi( vec_nv[1] )-1) / 30 + 1;	// we consider it a generation when 10 particles have been tested, and start counting with 1 instead of 0
+							generation = (std::stoi( vec_nv[1] )-1) / 10 + 1;	// we consider it a generation when 10 particles have been tested, and start counting with 1 instead of 0
 							//std::cout << "  gen=" << vec_nv[1] << std::endl;
 							break;
 						}
@@ -353,6 +355,42 @@ class LogParser {
 			std::cout << "finished parsing" << std::endl;
 		}
 		
+		/** @brief reads a comment line. it may contain information about the max_generation number
+		 */
+		void readComment( std::string line ) {
+			std::vector< std::string > params_set;
+			std::vector< std::string > parse_tokens;	// vector of space-separated tokens
+			std::vector< std::string > vec_nv;			// vector of two strings: name and value
+			
+			boost::split( params_set, line, boost::is_any_of(" ") );
+			
+			// parse all tokens, one by one, until we find the 'generation' token
+			for( int i=0; i<parse_tokens.size(); i++ ) {
+				// ignore empty tokens
+				if( parse_tokens[i].size() < 1 )
+					continue;
+				
+				
+				vec_nv.resize( 0 );
+				
+				// split token into name and value strings
+				boost::split( vec_nv, parse_tokens[i], boost::is_any_of("=") );
+				if( vec_nv.size() != 2 ) {
+					std::cout << "warning: invalid token ('" << parse_tokens[i] << "'" << std::endl;
+					continue;
+				}
+				
+				
+				if( vec_nv[0] == "max_population" ) {
+					//generation = atoi(vec_nv[1].c_str() );
+					max_generation_ = std::stoi( vec_nv[1] );
+					std::cout << "# max-generations=" << vec_nv[1] << std::endl;
+					break;
+				}
+				
+			}
+		}
+		
 		/** @brief writes generation #, mean, min & max to the log file (in that order)
 		 */
 		void writeMMM( std::ofstream &file ) {
@@ -372,8 +410,8 @@ class LogParser {
 		 */
 		void writeParticles( std::ofstream &file ) {
 			for( int g=0; g<vec_gen_info_.size(); g++ ) {
+				double error;
 				for( int p=0; p<vec_gen_info_[g].params_.size(); p++ ) {
-					double error;
 					double e = vec_gen_info_[g].params_[p].error();
 					// each particle handles two joints, hence the modulo 2
 					if( p%2 == 0 ) {

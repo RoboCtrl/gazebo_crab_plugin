@@ -65,7 +65,7 @@ typedef struct {
 	/// @brief returns the weighted error
 	double error() {
 		// weighting the position/angle error heigher to compensate for the different scaling
-		return vel_sq_mean_error + 1000*pos_sq_mean_error;
+		return vel_sq_mean_error + 10000*pos_sq_mean_error;
 	}
 } j_param_t;
 
@@ -79,7 +79,9 @@ std::ostream &dump( std::ostream &o, const j_param_t &param ) {
 		<< " d=" << param.d
 		<< " i_clamp=" << param.i_clamp
 		<< " v_max=" << param.max_vel
-		<< " damp=" << param.damping;
+		<< " damp=" << param.damping
+		<< " input_type=" << param.input_type
+		<< " update_type=" << param.update_type;
 }
 
 
@@ -87,5 +89,15 @@ std::ostream &dump( std::ostream &o, const j_param_t &param ) {
 std::ostream& operator << (std::ostream &o,const j_param_t &p){
   return dump(o,p);
 }
+
+
+
+
+
+
+
+
+
+
 
 

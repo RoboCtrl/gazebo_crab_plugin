@@ -258,6 +258,9 @@ namespace gazebo {
 			double update_input_pos() {
 				double current_angle = joint_->GetAngle( 0 ).Radian();
 				double d_angle = desired_value_ - current_angle;
+				
+				joint_desired_velocity_ = 0.0;
+				
 				return d_angle;
 			}
 			
@@ -283,6 +286,8 @@ namespace gazebo {
 				}
 				
 				double d_vel = desired_velocity - joint_velocity_;			// by what value we want to change the current joint velocity
+				
+				joint_desired_velocity_ = desired_velocity;
 				
 				return d_vel;
 			}
@@ -427,6 +432,20 @@ namespace gazebo {
 						<< " " << (joint_velocity_ - joint_desired_velocity_)	// velocity error
 						<< std::endl;
 				}
+				
+				// we only publish when we have at least one subscriber to our topic
+				if( pub_err_.getNumSubscribers() > 0 ) {
+					gazebo_crab_plugin::pid_joint_error err_msg;
+					err_msg.angle = joint_angle_;
+					err_msg.angle_error = desired_value_ - joint_angle_;
+					err_msg.velocity = joint_velocity_;
+					err_msg.velocity_error = joint_velocity_ - joint_desired_velocity_;
+					err_msg.force = joint_->GetForce(0);
+					err_msg.force_delta = joint_delta_force_;
+					
+					pub_err_.publish( err_msg );
+				}
+				
 			}
 			
 			/// @brief creates a log file and writes the header to it
@@ -495,8 +514,23 @@ namespace gazebo {
 					joint_->SetVelocity( 0, 0.0 );
 					joint_->SetAngle( 0, 0.0 );
 					reset_ = false;
-					// todo: reset past_values_ too
+					
+					joint_angle_ = 0.0;
+					joint_desired_velocity_ = 0.0;
+					joint_delta_force_ = 0.0;
+					joint_force_ = 0.0;
+					for( int i=0; i<past_values_.size(); i++ )
+						past_values_[i] = 0.0;
 				}
+				
+				// debugging
+				//
+				/*
+				update_velForce();
+				return;
+				*/
+				//
+				// end of debugging
 				
 				ros::Time now = ros::Time::now();					// current time
 				ros::Duration dt = now - time_last_update_;			// delta time (now - last update)
@@ -551,7 +585,7 @@ namespace gazebo {
 				
 				// save some values that we might publish
 				joint_angle_ = current_angle;
-				joint_desired_velocity_ = 0.0;
+				//joint_desired_velocity_ = 0.0;
 				joint_delta_force_ = new_force - joint_force_;
 				joint_force_ = new_force;
 				
